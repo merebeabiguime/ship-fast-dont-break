@@ -1,0 +1,84 @@
+# =============================================================================
+# DATABASE MIGRATIONS DOCKERFILE
+# =============================================================================
+#
+# This container is designed to run ONCE and exit. It's not a long-running
+# service like the API. The pattern:
+#
+#   1. Container starts
+#   2. Runs migration command (migrate, migrate:down, or migrate:status)
+#   3. Connects to RDS, executes SQL
+#   4. Exits (and is deleted via --rm flag)
+#
+# Why a separate container instead of running migrations in the API container?
+#
+#   - ISOLATION: Migration failures don't crash the running API
+#   - TIMING: Migrations run BEFORE new API code expects new schema
+#   - CONTROL: Explicit decision to run migrations (not automatic)
+#   - DEBUGGING: Clear logs for migration-specific issues
+# =============================================================================
+
+FROM node:20.5.0
+
+# -----------------------------------------------------------------------------
+# ENVIRONMENT VARIABLES (Build-time)
+#
+# These are passed via --build-arg in the pipeline.
+# They're baked into the image but can be overridden at runtime.
+# -----------------------------------------------------------------------------
+ARG ENVIRONMENT
+ARG NODE_ENV
+
+ENV ENVIRONMENT=$ENVIRONMENT
+ENV NODE_ENV=$NODE_ENV
+
+WORKDIR /app
+
+# -----------------------------------------------------------------------------
+# COPY PACKAGE FILES AND INSTALL DEPENDENCIES
+#
+# Note: We don't use multi-stage here because:
+# 1. Migrations are infrequent (we optimize for simplicity, not size)
+# 2. We need Sequelize CLI at runtime
+# 3. Image size matters less for ephemeral containers
+# -----------------------------------------------------------------------------
+COPY sequelizeDeployment/package*.json ./
+
+RUN npm install
+
+# -----------------------------------------------------------------------------
+# INSTALL SEQUELIZE CLI GLOBALLY
+#
+# This allows running `sequelize` commands directly.
+# In practice, our npm scripts handle this, but it's useful for debugging.
+# -----------------------------------------------------------------------------
+RUN npm install -g sequelize-cli
+
+# -----------------------------------------------------------------------------
+# COPY MIGRATION FILES
+# -----------------------------------------------------------------------------
+COPY sequelizeDeployment/ .
+
+# -----------------------------------------------------------------------------
+# EXPOSE PORT (Not Actually Used)
+#
+# Migrations don't listen on a port. This is here for consistency
+# and in case we ever add a health check endpoint.
+# -----------------------------------------------------------------------------
+EXPOSE 3000
+
+# -----------------------------------------------------------------------------
+# DYNAMIC COMMAND EXECUTION
+#
+# The COMMAND environment variable is set at runtime via:
+#   docker run -e COMMAND=migrate ...
+#
+# This runs: npm run $COMMAND
+# Which maps to package.json scripts:
+#   - "migrate": Run pending migrations
+#   - "migrate:down": Rollback last migration
+#   - "migrate:status": Show migration status (read-only)
+#
+# This pattern allows one image to do multiple things based on input.
+# -----------------------------------------------------------------------------
+CMD ["sh", "-c", "npm run $COMMAND"]

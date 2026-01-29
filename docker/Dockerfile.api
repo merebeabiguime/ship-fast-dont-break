@@ -1,0 +1,111 @@
+# =============================================================================
+# BACKEND API DOCKERFILE (Multi-Stage Build)
+# =============================================================================
+#
+# This Dockerfile uses a multi-stage build pattern to create a small,
+# production-ready image. The key insight:
+#
+#   Development dependencies (TypeScript, testing tools, etc.) are only
+#   needed during BUILD. The final image only needs runtime dependencies.
+#
+# Result: ~300MB image instead of ~800MB with dev dependencies
+# =============================================================================
+
+
+# =============================================================================
+# STAGE 1: BUILDER
+# =============================================================================
+#
+# This stage:
+# 1. Installs ALL dependencies (including dev)
+# 2. Compiles TypeScript to JavaScript
+# 3. Produces the /dist folder
+#
+# This stage is discarded after build - it doesn't end up in the final image.
+# =============================================================================
+
+FROM node:20.5.0 AS builder
+
+WORKDIR /app
+
+# -----------------------------------------------------------------------------
+# COPY PACKAGE FILES FIRST (Layer Caching Optimization)
+#
+# Docker caches layers. By copying package*.json first, we only re-run
+# npm install when dependencies change - not on every code change.
+#
+# This saves 2-3 minutes per build when only code changes.
+# -----------------------------------------------------------------------------
+COPY api/package*.json ./
+
+# -----------------------------------------------------------------------------
+# INSTALL ALL DEPENDENCIES
+#
+# --legacy-peer-deps: Ignore peer dependency conflicts
+# In an ideal world, we'd fix these. In early-stage, we move fast.
+# -----------------------------------------------------------------------------
+RUN npm ci --legacy-peer-deps
+
+# -----------------------------------------------------------------------------
+# COPY SOURCE CODE AND BUILD
+# -----------------------------------------------------------------------------
+COPY api/tsconfig.json ./
+COPY api/ ./
+
+# Compile TypeScript → JavaScript
+# Output goes to /app/dist
+RUN npm run build
+
+
+# =============================================================================
+# STAGE 2: RUNTIME (Final Image)
+# =============================================================================
+#
+# This is the actual image that runs in production. It contains:
+# - Node.js runtime
+# - Compiled JavaScript (/dist)
+# - Production dependencies only
+#
+# It does NOT contain:
+# - TypeScript source files
+# - TypeScript compiler
+# - Dev dependencies (testing, linting, etc.)
+# =============================================================================
+
+FROM node:20.5.0
+
+WORKDIR /app
+
+# -----------------------------------------------------------------------------
+# COPY BUILD ARTIFACTS FROM BUILDER STAGE
+#
+# --from=builder: Copy from the builder stage, not the host
+# We only take what we need: package files and compiled code
+# -----------------------------------------------------------------------------
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/dist ./dist
+
+# -----------------------------------------------------------------------------
+# INSTALL PRODUCTION DEPENDENCIES ONLY
+#
+# --only=production: Skip devDependencies
+# This is where we save significant space
+# -----------------------------------------------------------------------------
+RUN npm ci --only=production
+
+# -----------------------------------------------------------------------------
+# EXPOSE PORT
+#
+# Document which port the app listens on.
+# This doesn't actually open the port - that's done with -p in docker run.
+# It's documentation for humans and tools.
+# -----------------------------------------------------------------------------
+EXPOSE 3000
+
+# -----------------------------------------------------------------------------
+# START COMMAND
+#
+# Run the compiled JavaScript directly with Node.
+# No ts-node, no nodemon - just pure Node.js for production.
+# -----------------------------------------------------------------------------
+CMD ["node", "dist/server.js"]

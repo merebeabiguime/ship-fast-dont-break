@@ -1,0 +1,158 @@
+# =============================================================================
+# PRODUCTION DEPLOYMENT PIPELINE
+# =============================================================================
+#
+# This pipeline deploys to production ONLY when code is pushed to the
+# 'production' branch. This is intentionally more restrictive than staging.
+#
+# The workflow is:
+# 1. Features are developed and merged to 'main' (auto-deploys to staging)
+# 2. Team tests on staging
+# 3. When ready, merge 'main' → 'production' (deploys to prod)
+#
+# This ensures nothing reaches production without explicit human decision.
+# =============================================================================
+
+name: Production Deployment
+
+# -----------------------------------------------------------------------------
+# TRIGGER: PRODUCTION BRANCH ONLY
+#
+# Unlike staging (which deploys on every push to main), production only
+# deploys when we explicitly merge to the production branch.
+#
+# This is our "gate" - code must be tested in staging before this merge.
+# -----------------------------------------------------------------------------
+on:
+  push:
+    branches:
+      - production
+  workflow_dispatch:  # Manual trigger for re-deploys (e.g., after ENV update)
+
+env:
+  ENVIRONMENT: production
+  CONTAINER_NAME: production
+  ENV_VERSION: v1.0.0  # Must match S3 file: .env-production-v1.0.0
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # AWS CREDENTIALS
+      #
+      # Note: We use the same credentials as staging here. In a larger org,
+      # you might want completely separate AWS accounts for prod vs staging.
+      # -----------------------------------------------------------------------
+      - name: Setup AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_STAGING }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_STAGING }}
+          aws-region: eu-west-3
+
+      - name: Login to AWS ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: v0.8.0
+
+      # -----------------------------------------------------------------------
+      # BUILD WITH PRODUCTION TAG
+      #
+      # The image is tagged with 'production-v1.0.0' to distinguish from
+      # 'development-v1.0.0' (staging). This makes it clear in ECR which
+      # images are for which environment.
+      # -----------------------------------------------------------------------
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }}
+          build-args: |
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+            NODE_ENV=${{ env.ENVIRONMENT }}
+
+      # -----------------------------------------------------------------------
+      # DEPLOY TO PRODUCTION EC2
+      #
+      # Key difference from staging: EC2_INSTANCE_ID_PRODUCTION
+      # This is a DIFFERENT instance, completely isolated from staging.
+      #
+      # If staging crashes due to a bad deploy, production keeps running.
+      # -----------------------------------------------------------------------
+      - name: Deploy to EC2 via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID_PRODUCTION }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{
+              "commands": [
+                "set -ex",
+                "echo \"========================================\"",
+                "echo \"PRODUCTION DEPLOYMENT at $(date)\"",
+                "echo \"========================================\"",
+
+                "mkdir -p /home/ec2-user/project/",
+
+                "# Fetch PRODUCTION env file (different from staging)",
+                "echo \"Fetching .env file from S3...\"",
+                "aws s3 cp s3://${{ secrets.S3_BUCKET_NAME_ENVS }}/.env-${{ env.ENVIRONMENT }}-${{ env.ENV_VERSION }} /home/ec2-user/project/.env",
+                "if [ ! -f /home/ec2-user/project/.env ]; then echo \".env file not found\"; exit 1; fi",
+
+                "echo \"Logging into ECR...\"",
+                "aws ecr get-login-password --region eu-west-3 | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}",
+
+                "echo \"Stopping and removing existing containers...\"",
+                "docker stop tipntap-api || true",
+                "docker rm tipntap-api || true",
+
+                "echo \"Pulling new image...\"",
+                "docker rmi ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }} || true",
+                "docker pull ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }}",
+
+                "# --restart=always is CRITICAL for production",
+                "# It ensures the API restarts if:",
+                "# - The process crashes",
+                "# - The EC2 instance reboots",
+                "# - Docker daemon restarts",
+                "echo \"Starting new container...\"",
+                "docker run -d -p 3000:3000 --name tipntap-api --restart=always --env-file /home/ec2-user/project/.env ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }}",
+
+                "echo \"Waiting for container to start...\"",
+                "sleep 10",
+
+                "# Health check - if this fails, we know immediately",
+                "echo \"Checking container health...\"",
+                "if docker ps | grep -q tipntap-api; then echo \"Container started successfully\"; else echo \"Container failed to start\"; docker logs tipntap-api; exit 1; fi",
+
+                "echo \"========================================\"",
+                "echo \"PRODUCTION DEPLOYMENT SUCCESSFUL!\"",
+                "echo \"========================================"
+              ]
+            }' \
+            --output text
+
+          command_id=$(aws ssm list-commands --instance-id "${{ secrets.EC2_INSTANCE_ID_PRODUCTION }}" --query "Commands[0].CommandId" --output text)
+          status="Pending"
+          while [ "$status" = "Pending" ] || [ "$status" = "InProgress" ]; do
+            sleep 5
+            status=$(aws ssm list-commands --command-id "$command_id" --query "Commands[0].Status" --output text)
+          done
+
+          if [ "$status" != "Success" ]; then
+            echo "PRODUCTION DEPLOYMENT FAILED with status: $status"
+            aws ssm get-command-invocation --command-id "$command_id" --instance-id "${{ secrets.EC2_INSTANCE_ID_PRODUCTION }}" --query "StandardOutputContent" --output text
+            exit 1
+          fi
+
+          echo "Production deployment completed successfully"

@@ -1,0 +1,238 @@
+# =============================================================================
+# STAGING DEPLOYMENT PIPELINE
+# =============================================================================
+#
+# This pipeline automatically deploys the backend API to staging whenever
+# code is pushed to the main branch. It's designed for:
+#
+# 1. SPEED: Auto-deploy on every push so staging is always up-to-date
+# 2. SAFETY: Staging is isolated from production (different EC2 instance)
+# 3. VISIBILITY: Team can test features immediately after merge
+#
+# Typical deployment time: 3-5 minutes
+# =============================================================================
+
+name: Staging Deployment
+
+# -----------------------------------------------------------------------------
+# TRIGGER STRATEGY
+#
+# We deploy to staging on every push to main. This means:
+# - Every merged PR immediately goes to staging
+# - Team can test within minutes of code merge
+# - No manual "deploy to staging" step needed
+#
+# We also allow manual trigger (workflow_dispatch) for re-deploys without
+# code changes (e.g., after updating ENV files on S3)
+# -----------------------------------------------------------------------------
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Manual trigger button in GitHub Actions UI
+
+# -----------------------------------------------------------------------------
+# ENVIRONMENT VARIABLES
+#
+# These are NOT secrets - they're configuration that identifies this deployment.
+# Actual secrets (AWS keys, registry URLs) are in GitHub Secrets.
+#
+# ENV_VERSION: Must match the version uploaded to S3 via upload-env-to-s3.js
+# If you update .env and forget to update this, deployment will use old ENV.
+# -----------------------------------------------------------------------------
+env:
+  ENVIRONMENT: staging
+  CONTAINER_NAME: development  # Docker container name on the EC2 instance
+  ENV_VERSION: v1.0.0          # Must match S3 file: .env-staging-v1.0.0
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # STEP 1: CHECKOUT CODE
+      #
+      # Standard checkout. We need the code to build the Docker image.
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # STEP 2: CONFIGURE AWS CREDENTIALS
+      #
+      # We use separate AWS credentials for staging vs production.
+      # This follows the principle of least privilege - staging credentials
+      # can't accidentally touch production resources.
+      #
+      # In practice, we use the same IAM user but could easily separate them.
+      # -----------------------------------------------------------------------
+      - name: Setup AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_STAGING }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_STAGING }}
+          aws-region: eu-west-3  # Paris region - choose based on your users
+
+      # -----------------------------------------------------------------------
+      # STEP 3: LOGIN TO ECR
+      #
+      # Amazon Elastic Container Registry stores our Docker images privately.
+      # This step authenticates so we can push the image we're about to build.
+      # -----------------------------------------------------------------------
+      - name: Login to AWS ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # -----------------------------------------------------------------------
+      # STEP 4: SETUP DOCKER BUILDX
+      #
+      # Buildx is Docker's extended build capabilities. We use it for:
+      # - Better caching (speeds up builds)
+      # - Multi-platform support (if needed later)
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: v0.8.0
+
+      # -----------------------------------------------------------------------
+      # STEP 5: BUILD AND PUSH DOCKER IMAGE
+      #
+      # This builds our Node.js API using the multi-stage Dockerfile and
+      # pushes it to ECR with a tag that includes environment and version.
+      #
+      # Tag format: {registry}/{repo}:{environment}-{version}
+      # Example: 123456789.dkr.ecr.eu-west-3.amazonaws.com/api:development-v1.0.0
+      #
+      # The build-args pass environment info into the Docker build process.
+      # -----------------------------------------------------------------------
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }}
+          build-args: |
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+            NODE_ENV=${{ env.ENVIRONMENT }}
+
+      # -----------------------------------------------------------------------
+      # STEP 6: DEPLOY TO EC2 VIA SSM
+      #
+      # This is where the magic happens. Instead of SSH-ing into the server,
+      # we use AWS Systems Manager (SSM) to run commands remotely.
+      #
+      # Why SSM instead of SSH?
+      # - No SSH keys to manage or rotate
+      # - Built-in audit trail in AWS CloudTrail
+      # - Works through firewalls (no port 22 needed)
+      # - IAM-based access control
+      #
+      # The commands below run IN ORDER on the EC2 instance:
+      # -----------------------------------------------------------------------
+      - name: Deploy to EC2 via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID_STAGING }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{
+              "commands": [
+                "set -ex",
+
+                "echo \"========================================\"",
+                "echo \"Starting deployment at $(date)\"",
+                "echo \"========================================\"",
+
+                "# Create project directory if it does not exist",
+                "mkdir -p /home/ec2-user/project/",
+
+                "# ---------------------------------------------------------",
+                "# FETCH ENV FILE FROM S3",
+                "# This is the versioned .env file we uploaded separately.",
+                "# If this fails, deployment stops (the || exit 1 ensures this)",
+                "# ---------------------------------------------------------",
+                "echo \"Fetching .env file from S3...\"",
+                "aws s3 cp s3://${{ secrets.S3_BUCKET_NAME_ENVS }}/.env-${{ env.ENVIRONMENT }}-${{ env.ENV_VERSION }} /home/ec2-user/project/.env",
+                "if [ ! -f /home/ec2-user/project/.env ]; then echo \".env file not found\"; exit 1; fi",
+
+                "# ---------------------------------------------------------",
+                "# AUTHENTICATE WITH ECR",
+                "# Docker needs credentials to pull from our private registry",
+                "# ---------------------------------------------------------",
+                "echo \"Logging into ECR...\"",
+                "aws ecr get-login-password --region eu-west-3 | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}",
+
+                "# ---------------------------------------------------------",
+                "# STOP AND REMOVE OLD CONTAINER",
+                "# The || true ensures we dont fail if container doesnt exist",
+                "# (e.g., first deployment or after manual cleanup)",
+                "# ---------------------------------------------------------",
+                "echo \"Stopping and removing existing containers...\"",
+                "docker stop tipntap-api || true",
+                "docker rm tipntap-api || true",
+
+                "# ---------------------------------------------------------",
+                "# PULL NEW IMAGE AND CLEAN OLD ONE",
+                "# We remove the old image first to save disk space",
+                "# (EC2 instances have limited storage)",
+                "# ---------------------------------------------------------",
+                "echo \"Pulling new image...\"",
+                "docker rmi ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }} || true",
+                "docker pull ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }}",
+
+                "# ---------------------------------------------------------",
+                "# START NEW CONTAINER",
+                "# Key flags:",
+                "# -d: Run in background (detached)",
+                "# -p 3000:3000: Map host port to container port",
+                "# --restart=always: Auto-restart on crash or reboot",
+                "# --env-file: Load environment variables from file",
+                "# ---------------------------------------------------------",
+                "echo \"Starting new container...\"",
+                "docker run -d -p 3000:3000 --name tipntap-api --restart=always --env-file /home/ec2-user/project/.env ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }}",
+
+                "# ---------------------------------------------------------",
+                "# HEALTH CHECK",
+                "# Wait for container to start, then verify it is running.",
+                "# If it crashed immediately, we want to know and fail the deploy.",
+                "# ---------------------------------------------------------",
+                "echo \"Waiting for container to start...\"",
+                "sleep 10",
+                "echo \"Checking container health...\"",
+                "if docker ps | grep -q tipntap-api; then echo \"Container started successfully\"; else echo \"Container failed to start\"; docker logs tipntap-api; exit 1; fi",
+
+                "echo \"========================================\"",
+                "echo \"Deployment successful!\"",
+                "echo \"========================================"
+              ]
+            }' \
+            --output text
+
+          # -------------------------------------------------------------------
+          # WAIT FOR COMMAND COMPLETION
+          #
+          # SSM send-command is async - it returns immediately. We need to
+          # poll for the actual result to know if deployment succeeded.
+          # -------------------------------------------------------------------
+          command_id=$(aws ssm list-commands --instance-id "${{ secrets.EC2_INSTANCE_ID_STAGING }}" --query "Commands[0].CommandId" --output text)
+          status="Pending"
+          while [ "$status" = "Pending" ] || [ "$status" = "InProgress" ]; do
+            sleep 5
+            status=$(aws ssm list-commands --command-id "$command_id" --query "Commands[0].Status" --output text)
+          done
+
+          # -------------------------------------------------------------------
+          # HANDLE FAILURE
+          #
+          # If deployment failed, fetch the output logs so we can see what
+          # went wrong directly in the GitHub Actions log.
+          # -------------------------------------------------------------------
+          if [ "$status" != "Success" ]; then
+            echo "Deployment failed with status: $status"
+            aws ssm get-command-invocation --command-id "$command_id" --instance-id "${{ secrets.EC2_INSTANCE_ID_STAGING }}" --query "StandardOutputContent" --output text
+            exit 1
+          fi
+
+          echo "Deployment completed successfully"

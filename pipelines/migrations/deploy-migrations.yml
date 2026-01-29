@@ -1,0 +1,179 @@
+# =============================================================================
+# DATABASE MIGRATIONS PIPELINE
+# =============================================================================
+#
+# This pipeline runs database migrations on a dedicated "bastion" EC2 instance.
+# It's deliberately separate from the API deployment for several reasons:
+#
+# 1. SAFETY: Migrations can be destructive. We want explicit human control.
+# 2. ISOLATION: If a migration fails, it doesn't crash the running API.
+# 3. AUDITABILITY: Clear history of when migrations ran and what they did.
+# 4. FLEXIBILITY: Can run migrate:up, migrate:down, or migrate:status.
+#
+# The migration container is EPHEMERAL - it runs once and deletes itself.
+# No long-running processes, no state to clean up.
+# =============================================================================
+
+name: Migrations Deployment
+
+# -----------------------------------------------------------------------------
+# TRIGGERS: EXPLICIT CONTROL
+#
+# Option 1: Push to 'deploy' branch (for automated flows)
+# Option 2: Manual workflow_dispatch with command selection
+#
+# The manual trigger is the primary use case - you choose what to run.
+# -----------------------------------------------------------------------------
+on:
+  push:
+    branches:
+      - deploy
+  workflow_dispatch:
+    inputs:
+      command:
+        type: choice
+        description: 'Migration command to run'
+        options:
+          - migrate          # Run pending migrations (most common)
+          - migrate:down     # Rollback last migration
+          - migrate:status   # Check migration status (safe, read-only)
+
+env:
+  ENVIRONMENT: migrations
+  CONTAINER_NAME: migrations
+  ENV_VERSION: v1.0.0
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # DIFFERENT CREDENTIALS FOR MIGRATIONS
+      #
+      # Note: We use AWS_ACCESS_KEY_ID (not _STAGING). This could be a
+      # dedicated IAM user with permissions limited to:
+      # - ECR pull/push
+      # - S3 read (for .env files)
+      # - SSM send-command to the bastion instance only
+      # -----------------------------------------------------------------------
+      - name: Setup AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-3
+
+      - name: Login to AWS ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # -----------------------------------------------------------------------
+      # BUILD MIGRATION CONTAINER
+      #
+      # This container contains:
+      # - Node.js runtime
+      # - Sequelize CLI
+      # - All migration files
+      #
+      # It does NOT contain the API code - migrations are a separate concern.
+      # -----------------------------------------------------------------------
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }}
+          build-args: |
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+            NODE_ENV=${{ env.ENVIRONMENT }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # -----------------------------------------------------------------------
+      # RUN MIGRATION ON BASTION
+      #
+      # The bastion is a small EC2 instance whose ONLY job is to run migrations.
+      # It has network access to RDS (the database), but the API instances don't
+      # need direct RDS access - they go through the bastion conceptually.
+      #
+      # Actually, in our setup, API instances DO connect directly to RDS.
+      # The bastion is just for running migrations safely.
+      #
+      # KEY DIFFERENCE: --rm flag
+      # The container runs, executes the migration, and DELETES ITSELF.
+      # No cleanup needed, no orphaned containers.
+      # -----------------------------------------------------------------------
+      - name: Run Migration on Bastion EC2
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{
+              "commands": [
+                "set -ex",
+                "echo \"========================================\"",
+                "echo \"DATABASE MIGRATION at $(date)\"",
+                "echo \"Command: ${{ github.event.inputs.command }}\"",
+                "echo \"========================================\"",
+
+                "mkdir -p /home/ec2-user/project/",
+
+                "# Fetch migrations-specific .env",
+                "# This contains the DATABASE connection string",
+                "echo \"Fetching .env file from S3...\"",
+                "aws s3 cp s3://${{ secrets.S3_BUCKET_NAME_ENVS }}/.env-${{ env.ENVIRONMENT }}-${{ env.ENV_VERSION }} /home/ec2-user/project/.env",
+                "if [ ! -f /home/ec2-user/project/.env ]; then echo \".env file not found\"; exit 1; fi",
+
+                "echo \"Logging into ECR...\"",
+                "aws ecr get-login-password --region eu-west-3 | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}",
+
+                "# Clean up ANY existing containers on the bastion",
+                "# This ensures a clean slate for the migration",
+                "echo \"Stopping and removing existing containers...\"",
+                "docker stop $(docker ps -aq) || true",
+                "docker rm $(docker ps -aq) || true",
+
+                "echo \"Pulling migration image...\"",
+                "docker pull ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }}",
+
+                "# ============================================================",
+                "# THE CRITICAL PART: Run migration with --rm",
+                "# ============================================================",
+                "#",
+                "# --rm: Container is deleted after execution (success or fail)",
+                "# --name: Just for identification during execution",
+                "# --env-file: Database credentials from S3",
+                "# -e COMMAND: Passed to the Dockerfile CMD to run the right script",
+                "#",
+                "# The container runs: npm run $COMMAND",
+                "# Which maps to: migrate | migrate:down | migrate:status",
+                "#",
+                "echo \"Running migration...\"",
+                "docker run --rm --name tipntap-migrations --env-file /home/ec2-user/project/.env -e COMMAND=${{ github.event.inputs.command }} ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.CONTAINER_NAME }}-${{ env.ENV_VERSION }}"
+              ]
+            }' \
+            --output text
+
+          # Wait for completion and check result
+          command_id=$(aws ssm list-commands --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --query "Commands[0].CommandId" --output text)
+          status="Pending"
+          while [ "$status" = "Pending" ] || [ "$status" = "InProgress" ]; do
+            sleep 5
+            status=$(aws ssm list-commands --command-id "$command_id" --query "Commands[0].Status" --output text)
+          done
+
+          if [ "$status" != "Success" ]; then
+            echo "MIGRATION FAILED with status: $status"
+            aws ssm get-command-invocation --command-id "$command_id" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --query "StandardOutputContent" --output text
+            exit 1
+          fi
+
+          echo "Migration completed. Check logs for detailed output."
