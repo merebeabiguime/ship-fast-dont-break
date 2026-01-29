@@ -94,7 +94,7 @@ git clone https://github.com/merebeabiguime/ship-fast-dont-break.git
 cd ship-fast-dont-break
 ```
 
-### Structure du Projet
+### Project Structure
 
 ```
 ship-fast-dont-break/
@@ -118,18 +118,18 @@ ship-fast-dont-break/
     └── ticket-template.md            # Structured ticket for human validation
 ```
 
-### Explorer le Code
+### Explore the Code
 
-**Parcours recommandé pour comprendre le système :**
+**Recommended path to understand the system:**
 
-1. **Comprendre l'évolution** → [`docs/EVOLUTION.md`](./docs/EVOLUTION.md) — Du chaos initial au système mature
-2. **Voir l'architecture** → [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — Diagrammes Mermaid + décisions
-3. **Le workflow humain** → [`docs/WORKFLOW.md`](./docs/WORKFLOW.md) — Comment tester sans tests automatisés
-4. **Pipeline staging** → [`pipelines/backend/deploy-staging.yml`](./pipelines/backend/deploy-staging.yml) — Auto-deploy commenté
-5. **Dockerfile API** → [`docker/Dockerfile.api`](./docker/Dockerfile.api) — Multi-stage build expliqué
-6. **Template de ticket** → [`templates/ticket-template.md`](./templates/ticket-template.md) — Le format qui structure la validation
+1. **Understand the evolution** → [`docs/EVOLUTION.md`](./docs/EVOLUTION.md) — From initial chaos to mature system
+2. **See the architecture** → [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — Mermaid diagrams + decisions
+3. **The human workflow** → [`docs/WORKFLOW.md`](./docs/WORKFLOW.md) — How to test without automated tests
+4. **Staging pipeline** → [`pipelines/backend/deploy-staging.yml`](./pipelines/backend/deploy-staging.yml) — Commented auto-deploy
+5. **API Dockerfile** → [`docker/Dockerfile.api`](./docker/Dockerfile.api) — Multi-stage build explained
+6. **Ticket template** → [`templates/ticket-template.md`](./templates/ticket-template.md) — The format that structures validation
 
-**Tous les fichiers sont hyper-commentés** pour expliquer le "pourquoi" de chaque décision.
+**All files are heavily commented** to explain the "why" behind each decision.
 
 ---
 
@@ -146,83 +146,83 @@ This system isn't perfect. Here's what I'd improve with more resources:
 
 ---
 
-## 📝 À Propos : Product Engineer
+## 📝 About: Product Engineer
 
-### Mon Parcours
+### My Journey
 
-En tant que **Product Engineer chez Tipntap** (startup early-stage B2B SaaS), j'ai dû résoudre un problème que beaucoup de startups rencontrent :
+As a **Product Engineer at Tipntap** (early-stage B2B SaaS startup), I had to solve a problem that many startups face:
 
-> Comment déployer souvent sans casser la prod quand on n'a ni budget QA, ni temps pour des tests automatisés complets ?
+> How do you deploy often without breaking production when you have no QA budget and no time for comprehensive automated tests?
 
-Ma réponse : **un système de validation humaine structuré + une architecture qui isole les risques**.
+My answer: **a structured human validation system + an architecture that isolates risks**.
 
-**Résultat sur 1 an :** 50+ déploiements, 0 rollback, 0 crash majeur — avec une équipe de 2-4 personnes et < $50/mois d'infra.
+**Result over 1 year:** 50+ deployments, 0 rollbacks, 0 major crashes — with a team of 2-4 people and < $50/month infra.
 
-### Ce Que Je Recherche
+### What I'm Looking For
 
-Je cherche des opportunités en tant que **Product Engineer** dans des startups early-stage qui :
-- Valorisent l'excellence technique ET le product thinking
-- Veulent construire vite sans sacrifier la stabilité
-- Comprennent qu'un bon process vaut mieux que zéro bug
-- Cherchent quelqu'un qui a déjà vécu les contraintes early-stage
+I'm looking for opportunities as a **Product Engineer** at early-stage startups that:
+- Value technical excellence AND product thinking
+- Want to build fast without sacrificing stability
+- Understand that a good process beats zero bugs
+- Are looking for someone who's already lived early-stage constraints
 
-### Compétences
+### Skills
 
-**Backend & DevOps :**
+**Backend & DevOps:**
 - Node.js + TypeScript
 - Docker + CI/CD (GitHub Actions)
 - AWS (EC2, RDS, S3, ECR, SSM)
 - Infrastructure as Code
 - Database migrations (Sequelize)
 
-**Frontend :**
+**Frontend:**
 - React 18 + TypeScript
 - Redux Toolkit
 - Cloudflare Pages
 
-**Product Engineering :**
+**Product Engineering:**
 - MVP → Product-Market Fit
-- Itérations rapides basées sur feedbacks
-- Architecture évolutive
-- Gestion de la dette technique
-- Process de validation humaine
+- Rapid iterations based on feedback
+- Evolutionary architecture
+- Technical debt management
+- Human validation processes
 
 ### Contact
 
-- 📧 Email : [merebeabiguime@outlook.fr](mailto:merebeabiguime@outlook.fr)
-- 💼 LinkedIn : [linkedin.com/in/mérébé-abiguime-96b4842b2](https://www.linkedin.com/in/mérébé-abiguime-96b4842b2)
-- 🐙 GitHub : [@merebeabiguime](https://github.com/merebeabiguime)
-- 🌐 Portfolio : [merebeabiguime.com](https://merebeabiguime.com)
+- 📧 Email: [merebeabiguime@outlook.fr](mailto:merebeabiguime@outlook.fr)
+- 💼 LinkedIn: [linkedin.com/in/mérébé-abiguime-96b4842b2](https://www.linkedin.com/in/mérébé-abiguime-96b4842b2)
+- 🐙 GitHub: [@merebeabiguime](https://github.com/merebeabiguime)
+- 🌐 Portfolio: [merebeabiguime.com](https://merebeabiguime.com)
 
 ---
 
-## 📚 Ressources Supplémentaires
+## 📚 Additional Resources
 
-### Autres Repos Showcase
+### Other Showcase Repos
 
-- **[Frontend MVP Architecture](https://github.com/merebeabiguime/frontend-mvp-architecture)** — Comment je structure mes apps React pour itérer rapidement
+- **[Frontend MVP Architecture](https://github.com/merebeabiguime/frontend-mvp-architecture)** — How I structure React apps for rapid iteration
 
-### Références
+### References
 
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Docker Multi-Stage Builds](https://docs.docker.com/build/building/multi-stage/)
 - [AWS Systems Manager (SSM)](https://docs.aws.amazon.com/systems-manager/latest/userguide/what-is-systems-manager.html)
-- [The Twelve-Factor App](https://12factor.net/) — Principes de déploiement modernes
+- [The Twelve-Factor App](https://12factor.net/) — Modern deployment principles
 
 ---
 
 ## 📄 License
 
-MIT License — Utilisez librement ce code comme template pour vos propres déploiements.
+MIT License — Feel free to use this code as a template for your own deployments.
 
 ---
 
-## ⭐ Si Ce Projet Vous Aide
+## ⭐ If This Project Helps You
 
-Si ce système vous aide dans votre startup, n'hésitez pas à :
-- ⭐ Star le repo
-- 🔄 Partager avec d'autres Product Engineers
-- 💬 Me contacter pour discuter déploiement et process
+If this system helps your startup, feel free to:
+- ⭐ Star the repo
+- 🔄 Share with other Product Engineers
+- 💬 Reach out to discuss deployment and processes
 
 **Ship fast, don't break!** 🚀
 
