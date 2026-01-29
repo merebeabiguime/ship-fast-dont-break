@@ -71,42 +71,6 @@ Over ~1 year of active development:
 
 ---
 
-## What's in This Repo
-
-This repository contains the actual infrastructure code I used, with detailed comments explaining the *why* behind each decision.
-
-```
-ship-fast-dont-break/
-├── README.md                 # You are here
-├── docs/
-│   ├── EVOLUTION.md          # How the process evolved (chaos → structure)
-│   ├── ARCHITECTURE.md       # Infrastructure diagram + decisions
-│   └── WORKFLOW.md           # The human validation workflow
-├── pipelines/
-│   ├── backend/
-│   │   ├── deploy-staging.yml    # Auto-deploy on push to main
-│   │   └── deploy-production.yml # Deploy on push to production branch
-│   └── migrations/
-│       └── deploy-migrations.yml # Manual trigger with command choice
-├── docker/
-│   ├── Dockerfile.api        # Multi-stage build for Node.js API
-│   └── Dockerfile.migrations # Ephemeral container for DB migrations
-├── scripts/
-│   └── upload-env-to-s3.js   # CLI tool to version ENV files
-└── templates/
-    └── ticket-template.md    # Structured ticket for human validation
-```
-
----
-
-## Quick Links
-
-- **[Evolution: From Chaos to System](docs/EVOLUTION.md)** — The 4 phases our process went through
-- **[Architecture Deep Dive](docs/ARCHITECTURE.md)** — Why each component is separated
-- **[The Human Validation Workflow](docs/WORKFLOW.md)** — How we test without automated tests
-
----
-
 ## Who Is This For?
 
 This approach works best if you:
@@ -118,6 +82,54 @@ This approach works best if you:
 - Can't justify the time investment in comprehensive automated testing *yet*
 
 It's **not** a replacement for automated testing at scale. Once you have product-market fit and a larger team, invest in proper test infrastructure.
+
+---
+
+## 🚀 Getting Started
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/merebeabiguime/ship-fast-dont-break.git
+cd ship-fast-dont-break
+```
+
+### Structure du Projet
+
+```
+ship-fast-dont-break/
+├── README.md                         # You are here!
+├── docs/
+│   ├── EVOLUTION.md                  # How the process evolved (chaos → structure)
+│   ├── ARCHITECTURE.md               # Infrastructure diagrams + decisions
+│   └── WORKFLOW.md                   # The human validation workflow
+├── pipelines/
+│   ├── backend/
+│   │   ├── deploy-staging.yml        # Auto-deploy on push to main
+│   │   └── deploy-production.yml     # Deploy on push to production branch
+│   └── migrations/
+│       └── deploy-migrations.yml     # Manual trigger with command choice
+├── docker/
+│   ├── Dockerfile.api                # Multi-stage build for Node.js API
+│   └── Dockerfile.migrations         # Ephemeral container for DB migrations
+├── scripts/
+│   └── upload-env-to-s3.js           # CLI tool to version ENV files
+└── templates/
+    └── ticket-template.md            # Structured ticket for human validation
+```
+
+### Explorer le Code
+
+**Parcours recommandé pour comprendre le système :**
+
+1. **Comprendre l'évolution** → [`docs/EVOLUTION.md`](./docs/EVOLUTION.md) — Du chaos initial au système mature
+2. **Voir l'architecture** → [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — Diagrammes Mermaid + décisions
+3. **Le workflow humain** → [`docs/WORKFLOW.md`](./docs/WORKFLOW.md) — Comment tester sans tests automatisés
+4. **Pipeline staging** → [`pipelines/backend/deploy-staging.yml`](./pipelines/backend/deploy-staging.yml) — Auto-deploy commenté
+5. **Dockerfile API** → [`docker/Dockerfile.api`](./docker/Dockerfile.api) — Multi-stage build expliqué
+6. **Template de ticket** → [`templates/ticket-template.md`](./templates/ticket-template.md) — Le format qui structure la validation
+
+**Tous les fichiers sont hyper-commentés** pour expliquer le "pourquoi" de chaque décision.
 
 ---
 
@@ -134,18 +146,88 @@ This system isn't perfect. Here's what I'd improve with more resources:
 
 ---
 
-## About the Author
+## 📝 À Propos : Product Engineer
 
-I'm a **Product Engineer** who built Tipntap's entire technical stack solo while my co-founders handled business and design.
+### Mon Parcours
 
-- **Stack**: TypeScript, React, Node.js, MySQL, AWS, Cloudflare
-- **Looking for**: Product Engineer roles at B2B SaaS startups (early-stage to Series A)
+En tant que **Product Engineer chez Tipntap** (startup early-stage B2B SaaS), j'ai dû résoudre un problème que beaucoup de startups rencontrent :
 
-**Other showcase repos:**
-- [Frontend MVP Architecture](https://github.com/merebeabiguime/frontend-mvp-architecture) — How I structure React apps for rapid iteration
+> Comment déployer souvent sans casser la prod quand on n'a ni budget QA, ni temps pour des tests automatisés complets ?
+
+Ma réponse : **un système de validation humaine structuré + une architecture qui isole les risques**.
+
+**Résultat sur 1 an :** 50+ déploiements, 0 rollback, 0 crash majeur — avec une équipe de 2-4 personnes et < $50/mois d'infra.
+
+### Ce Que Je Recherche
+
+Je cherche des opportunités en tant que **Product Engineer** dans des startups early-stage qui :
+- Valorisent l'excellence technique ET le product thinking
+- Veulent construire vite sans sacrifier la stabilité
+- Comprennent qu'un bon process vaut mieux que zéro bug
+- Cherchent quelqu'un qui a déjà vécu les contraintes early-stage
+
+### Compétences
+
+**Backend & DevOps :**
+- Node.js + TypeScript
+- Docker + CI/CD (GitHub Actions)
+- AWS (EC2, RDS, S3, ECR, SSM)
+- Infrastructure as Code
+- Database migrations (Sequelize)
+
+**Frontend :**
+- React 18 + TypeScript
+- Redux Toolkit
+- Cloudflare Pages
+
+**Product Engineering :**
+- MVP → Product-Market Fit
+- Itérations rapides basées sur feedbacks
+- Architecture évolutive
+- Gestion de la dette technique
+- Process de validation humaine
+
+### Contact
+
+- 📧 Email : [merebeabiguime@outlook.fr](mailto:merebeabiguime@outlook.fr)
+- 💼 LinkedIn : [linkedin.com/in/mérébé-abiguime-96b4842b2](https://www.linkedin.com/in/mérébé-abiguime-96b4842b2)
+- 🐙 GitHub : [@merebeabiguime](https://github.com/merebeabiguime)
+- 🌐 Portfolio : [merebeabiguime.com](https://merebeabiguime.com)
 
 ---
 
-## License
+## 📚 Ressources Supplémentaires
 
-MIT — Feel free to use this as a template for your own deployment process.
+### Autres Repos Showcase
+
+- **[Frontend MVP Architecture](https://github.com/merebeabiguime/frontend-mvp-architecture)** — Comment je structure mes apps React pour itérer rapidement
+
+### Références
+
+- [GitHub Actions Documentation](https://docs.github.com/en/actions)
+- [Docker Multi-Stage Builds](https://docs.docker.com/build/building/multi-stage/)
+- [AWS Systems Manager (SSM)](https://docs.aws.amazon.com/systems-manager/latest/userguide/what-is-systems-manager.html)
+- [The Twelve-Factor App](https://12factor.net/) — Principes de déploiement modernes
+
+---
+
+## 📄 License
+
+MIT License — Utilisez librement ce code comme template pour vos propres déploiements.
+
+---
+
+## ⭐ Si Ce Projet Vous Aide
+
+Si ce système vous aide dans votre startup, n'hésitez pas à :
+- ⭐ Star le repo
+- 🔄 Partager avec d'autres Product Engineers
+- 💬 Me contacter pour discuter déploiement et process
+
+**Ship fast, don't break!** 🚀
+
+---
+
+<div align="center">
+  <sub>Built with ❤️ by a Product Engineer who's been there.</sub>
+</div>
